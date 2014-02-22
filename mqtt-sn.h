@@ -148,13 +148,14 @@ typedef struct topic_map {
 //         const uip_ipaddr_t *receiver_addr, uint16_t receiver_port, const uint8_t *data, uint16_t datalen);
 struct mqtt_sn_connection;
 struct mqtt_sn_callbacks {
-  /** Called when a packet has been received by the mqtt_sn module */
+  /** Called when a packet has been received by the mqtt_sn module or other event needs handled */
   void (* pingreq_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* pingresp_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* connack_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* regack_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* puback_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* disconnect_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
+  void (* keepalive_timeout)(struct mqtt_sn_connection *mqc);
 };
 
 enum connection_stat {

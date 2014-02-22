@@ -97,14 +97,16 @@ PROCESS_THREAD(unicast_sender_process, ev, data)
   //servreg_hack_init();
 
   set_global_address();
+  mqtt_sn_set_debug(1);
   //send to TUN interface for cooja simulation
   //uip_ip6addr(&addr, 0xaaaa, 0, 0, 0, 0, 0, 0, 1);
   //uip_ip6addr(&addr, 0x2001, 0x0db8, 1, 0xffff, 0, 0, 0xc0a8, 0xd480);//192.168.212.128 with tayga
   //uip_ip6addr(&addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xc0a8, 0xd480);//192.168.212.128 with tayga
-  uip_ip6addr(&addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xac10, 0xdc01);//172.16.220.1 with tayga
-  //uip_ip6addr(&addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xac10, 0xdc80);//172.16.220.128 with tayga
+  //uip_ip6addr(&addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xac10, 0xdc01);//172.16.220.1 with tayga
+  uip_ip6addr(&addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xac10, 0xdc80);//172.16.220.128 with tayga
   mqtt_sn_create_socket(&mqtt_sn_c,35555, &addr, UDP_PORT);
   (&mqtt_sn_c)->mc = &mqtt_sn_call;
+
 
 
   //connect, presume ack comes before timer fires

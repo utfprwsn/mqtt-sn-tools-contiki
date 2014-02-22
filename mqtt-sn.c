@@ -89,6 +89,7 @@ mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_
   struct mqtt_sn_connection *mqc = (struct mqtt_sn_connection *)sock;
   if (mqc->keep_alive > 0 && mqc->stat == CONNECTED){
     ctimer_restart((&(mqc->receive_timer)));
+    printf("recieve timer reset\n");
   }
   //last_receive = clock_time();
   if (datalen >= 2)
@@ -232,7 +233,11 @@ PROCESS_THREAD(mqtt_sn_process, ev, data)
     }
     else if (ev == receive_timeout_event){
       //if last receive has expired we need to stop and disconnect
+      printf("receive timeout event");
       mqtt_sn_send_disconnect(mqc);
+      if(mqc->mc->keepalive_timeout != NULL) {
+        mqc->mc->keepalive_timeout(mqc);
+      }
     }
     else if (ev == send_timeout_event){
       //if last send has expired, we need to send a pingreq
@@ -256,51 +261,7 @@ static void send_packet(struct mqtt_sn_connection *mqc, char* data, size_t len)
   }
 }
 #endif
-#if 0
-static void* recieve_packet(int sock)
-{
-    static uint8_t buffer[MQTT_SN_MAX_PACKET_LENGTH+1];
-    int length;
-    int bytes_read;
 
-    if (debug)
-        fprintf(stderr, "waiting for packet...\n");
-
-    // Read in the packet
-    bytes_read = recv(sock, buffer, MQTT_SN_MAX_PACKET_LENGTH, 0);
-    if (bytes_read < 0) {
-        if (errno == EAGAIN) {
-            if (debug)
-                fprintf(stderr, "Timed out waiting for packet.\n");
-            return NULL;
-        } else {
-            perror("recv failed");
-            return;
-        }
-    }
-
-    if (debug)
-        fprintf(stderr, "Received %d bytes. Type=%s.\n", (int)bytes_read, mqtt_sn_type_string(buffer[1]));
-
-    length = buffer[0];
-    if (length == 0x01) {
-        fprintf(stderr, "Error: packet received is longer than this tool can handle\n");
-        return;
-    }
-
-    if (length != bytes_read) {
-        fprintf(stderr, "Warning: read %d bytes but packet length is %d bytes.\n", (int)bytes_read, length);
-    }
-
-    // NULL-terminate the packet
-    buffer[length] = '\0';
-
-    // Store the last time that we received a packet
-    last_receive = time(NULL);
-
-    return buffer;
-}
-#endif
 #if 1
 void mqtt_sn_send_connect(struct mqtt_sn_connection *mqc, const char* client_id, uint16_t keepalive)
 {
@@ -414,8 +375,12 @@ void mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id, uin
     strncpy(packet.data, data, sizeof(packet.data));
     packet.length = 0x07 + data_len;
 
-    if (debug)
+    if (debug){
         printf("Sending PUBLISH packet...\n");
+        if (ctimer_expired(&(mqc->receive_timer))){
+            printf("receive timer has already expired...\n");
+        }
+    }
 
     return send_packet(mqc, (char*)&packet, packet.length);
 }
@@ -691,78 +656,7 @@ uint16_t mqtt_sn_recieve_suback(int sock)
     return received_topic_id;
 }
 #endif
-#if 0
-publish_packet_t* mqtt_sn_loop(int sock, int timeout)
-{
-    time_t now = time(NULL);
-    struct timeval tv;
-    fd_set rfd;
-    int ret;
 
-    // Time to send a ping?
-    if (keep_alive > 0 && (now - last_transmit) >= keep_alive) {
-        mqtt_sn_send_pingreq(sock);
-    }
-
-    FD_ZERO(&rfd);
-    FD_SET(sock, &rfd);
-
-    tv.tv_sec = timeout;
-    tv.tv_usec = 0;
-
-    ret = select(FD_SETSIZE, &rfd, NULL, NULL, &tv);
-    if (ret < 0) {
-        if (errno != EINTR) {
-            // Something is wrong.
-            perror("select");
-            return;
-        }
-    } else if (ret > 0) {
-        char* packet;
-
-        // Receive a packet
-        packet = recieve_packet(sock);
-        if (packet) {
-            switch(packet[1]) {
-                case MQTT_SN_TYPE_PUBLISH: {
-                    return (publish_packet_t*)packet;
-                    break;
-                }
-
-                case MQTT_SN_TYPE_REGISTER: {
-                    mqtt_sn_process_register(sock, (register_packet_t*)packet);
-                    break;
-                };
-
-                case MQTT_SN_TYPE_PINGRESP: {
-                    // do nothing
-                    break;
-                };
-
-                case MQTT_SN_TYPE_DISCONNECT: {
-                    fprintf(stderr, "Warning: Received DISCONNECT from gateway.\n");
-                    return;
-                    break;
-                };
-
-                default: {
-                    const char* type = mqtt_sn_type_string(packet[1]);
-                    fprintf(stderr, "Warning: unexpected packet type: %s.\n", type);
-                    break;
-                }
-            }
-        }
-    }
-
-    // Check for receive timeout
-    if (keep_alive > 0 && (now - last_receive) >= (keep_alive * 1.5)) {
-        fprintf(stderr, "Keep alive error: timed out receiving packet from gateway.\n");
-        return;
-    }
-
-    return NULL;
-}
-#endif
 #if 1
 const char* mqtt_sn_type_string(uint8_t type)
 {
