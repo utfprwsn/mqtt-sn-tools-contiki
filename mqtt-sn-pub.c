@@ -92,6 +92,10 @@ PROCESS_THREAD(unicast_sender_process, ev, data)
   static struct etimer send_timer;
   static uip_ipaddr_t addr;
 
+  static size_t buf_len;
+  static unsigned int message_number;
+  static char buf[20];
+
   PROCESS_BEGIN();
 
   //servreg_hack_init();
@@ -125,18 +129,18 @@ PROCESS_THREAD(unicast_sender_process, ev, data)
     printf("publishing \n ");
     //addr = servreg_hack_lookup(SERVICE_ID);
     //if(addr != NULL) {
-      static unsigned int message_number;
-      char buf[20];
+
 
 //      printf("Sending unicast to ");
 //      uip_debug_ipaddr_print(&addr);
 //      printf("\n");
       sprintf(buf, "Message %d", message_number);
       message_number++;
+      buf_len = strlen(buf);
 
       topic_id = (topic_name[0] << 8) + topic_name[1];
 
-      mqtt_sn_send_publish(&mqtt_sn_c, topic_id,topic_id_type,buf,qos,retain);
+      mqtt_sn_send_publish(&mqtt_sn_c, topic_id,topic_id_type,buf, buf_len,qos,retain);
       etimer_reset(&send_timer);
       //simple_udp_sendto(&unicast_connection, buf, strlen(buf) + 1, addr);
     //} else {

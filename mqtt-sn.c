@@ -353,11 +353,9 @@ static uint8_t mqtt_sn_get_qos_flag(int8_t qos)
     }
 }
 #if 1
-void mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id, uint8_t topic_type, const char* data, int8_t qos, uint8_t retain)
+void mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id, uint8_t topic_type, const char* data, size_t data_len, int8_t qos, uint8_t retain)
 {
     publish_packet_t packet;
-//this needs changed so that data is not assumed to be a null terminated string
-    size_t data_len = strlen(data);
 
     if (data_len > sizeof(packet.data)) {
         printf("Error: payload is too big\n");
