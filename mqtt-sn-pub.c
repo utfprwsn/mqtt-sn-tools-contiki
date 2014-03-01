@@ -92,7 +92,7 @@ PROCESS_THREAD(unicast_sender_process, ev, data)
   static struct etimer send_timer;
   static uip_ipaddr_t addr;
 
-  static size_t buf_len;
+  static uint8_t buf_len;
   static unsigned int message_number;
   static char buf[20];
 
