@@ -32,19 +32,41 @@ static int8_t qos = 1;
 uint8_t retain = FALSE;
 //uint8_t debug = FALSE;
 
-enum connection_status
+enum mqttsn_connection_status
 {
-  REQUESTED = 0,
-  REJECTED_CONGESTION,
-  REQUEST_TIMEOUT,
-  ACKNOWLEDGED,
-
+  DISCONNECTED =0,
+  WAITING_CONNACK,
+  CONNECTION_FAILED,
+  CONNECTED
 };
 
+enum topic_registration_status
+{
+  UNREGISTERED = 0,
+  WAITING_REGACK,
+  WAITING_TOPIC_ID,
+  REGISTER_FAILED,
+  REGISTERED
+};
+
+enum ctrl_subscription_status
+{
+  CTRL_UNSUBSCRIBED,
+  CTRL_WAITING_SUBACK,
+  CTRL_SUBSCRIBE_FAILED,
+  CTRL_SUBSCRIBED
+};
+
+
+/*A few events for managing device state*/
+static process_event_t mqttsn_connack_event;
+static process_event_t mqttsn_regack_event;
+static process_event_t mqttsn_suback_event;
 
 
 /*---------------------------------------------------------------------------*/
 PROCESS(unicast_sender_process, "Unicast sender example process");
+PROCESS(ctrl_subsciption_process, "subscribe to a device control channel");
 AUTOSTART_PROCESSES(&unicast_sender_process);
 /*---------------------------------------------------------------------------*/
 static void
@@ -80,23 +102,68 @@ set_global_address(void)
     }
   }
 }
+/*---------------------------------------------------------------------------*/
+static void
+sprintf_eui(void)
+{
+  sprintf(macs48,"%02X-%02X-%02X-%02X-%02X-%02X",
+                            dev_eth_addr.addr[0],
+                            dev_eth_addr.addr[1],
+                            dev_eth_addr.addr[2],
+                            dev_eth_addr.addr[3],
+                            dev_eth_addr.addr[4],
+                            dev_eth_addr.addr[5]);
+}
+
 
 /*---------------------------------------------------------------------------*/
 /*Add callbacks here if we make them*/
 static const struct mqtt_sn_callbacks mqtt_sn_call = {NULL,NULL,connack_receiver,NULL,puback_receiver,NULL};
+
+
+/*---------------------------------------------------------------------------*/
+PROCESS_THREAD(mqttsn_subscription_process, ev, data)
+{
+
+  static struct etimer subscription_timeout;
+  static char ctrl_topic[21];//of form "0011223344556677/ctrl" it is not null terminated, and is 21 charactes
+
+  PROCESS_BEGIN();
+  etimer_set(&subscription_timeout, SEND_TIME);
+  while(1) {
+
+
+    PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&subscription_timeout));
+
+  }
+
+  PROCESS_END();
+}
 
 /*---------------------------------------------------------------------------*/
 PROCESS_THREAD(unicast_sender_process, ev, data)
 {
   static struct etimer periodic_timer;
   static struct etimer send_timer;
+  static struct ctimer mqttsn_timeout;
   static uip_ipaddr_t addr;
 
   static uint8_t buf_len;
   static unsigned int message_number;
   static char buf[20];
+  static char ctrl_topic[25];
+  static uint8_t ctrl_channel_status = 0;
+  static uint8_t mqttsn_retries = 0;
+
+  static enum mqttsn_connection_status connection_state = DISCONNECTED;
+  static enum topic_registration_status registration_state = UNREGISTERED;
+  static enum ctrl_subscription_status ctrl_subscription_state = CTRL_UNSUBSCRIBED;
 
   PROCESS_BEGIN();
+
+  mqttsn_connack_event = process_alloc_event();
+  mqttsn_regack_event = process_alloc_event();
+  mqttsn_suback_event = process_alloc_event();
 
   //servreg_hack_init();
 
@@ -116,12 +183,29 @@ PROCESS_THREAD(unicast_sender_process, ev, data)
   //connect, presume ack comes before timer fires
   //mqtt_sn_send_connect(&unicast_connection,mqtt_client_id,mqtt_keep_alive);
 
-  etimer_set(&periodic_timer, 20*CLOCK_SECOND);
+
+  /*Wait a little to let system get set*/
+  etimer_set(&periodic_timer, 10*CLOCK_SECOND);
   PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&periodic_timer));
-    printf("requesting connection \n ");
-    mqtt_sn_send_connect(&mqtt_sn_c,mqtt_client_id,mqtt_keep_alive);
-    //etimer_reset(&periodic_timer);
-    etimer_set(&send_timer, SEND_TIME);
+
+  /*Request a connection and wait for connack*/
+  printf("requesting connection \n ");
+  for(mqttsn_retries =0; mqttsn_retries++
+  mqtt_sn_send_connect(&mqtt_sn_c,mqtt_client_id,mqtt_keep_alive);
+
+  etimer_set(&periodic_timer, 4*CLOCK_SECOND);
+  PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&periodic_timer));
+  printf("subscribing to control channel \n ");
+  while (ctrl_channel_status=0){
+   mqtt_sn_send_subscribe(&mqtt_sn_c,ctrl_topic,1);
+  }
+
+//  etimer_set(&periodic_timer, 4*CLOCK_SECOND);
+//  PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&periodic_timer));
+//  printf("registering topic\n ");
+
+  //etimer_reset(&periodic_timer);
+  etimer_set(&send_timer, SEND_TIME);
   while(1) {
 
 

@@ -15,6 +15,9 @@
 #define TRUE  (1)
 #endif
 
+#ifndef MQTT_SN_MAX_CONNECT_RETRIES
+#define MQTT_SN_MAX_CONNECT_RETRIES 3
+#endif
 
 #define MQTT_SN_MAX_PACKET_LENGTH  (255)
 #define MQTT_SN_MAX_TOPIC_LENGTH   (MQTT_SN_MAX_PACKET_LENGTH-6)
@@ -62,6 +65,13 @@
 #define MQTT_SN_FLAG_CLEAN   (0x1 << 2)
 
 #define MQTT_SN_PROTOCOL_ID  (0x01)
+
+enum mqtt_sn_return_code {
+  ACCEPTED = 0,
+  REGECTED_CONGESTION,
+  REJECTED_INVALID_TOPIC_ID,
+  REJECTED_NOT_SUPPORTED
+};
 
 typedef struct {
   uint8_t length;
@@ -158,10 +168,20 @@ struct mqtt_sn_callbacks {
   void (* keepalive_timeout)(struct mqtt_sn_connection *mqc);
 };
 
-enum connection_stat {
-    DISCONNECTED=0,
-    CONNECTED,
-    WAITING_ACK
+enum mqttsn_connection_status {
+    CONNECTED=0,
+    REJECTED_CONGESTION,
+    REJECTED_INVALID_TOPIC_,
+    REJECTED_NOT_SUPPORTED,
+    DISCONNECTED,
+    WAITING_ACK,
+    CONNECTION_FAILED
+};
+
+enum topic_status {
+  UNREGISTERED=0,
+  WAITING_REGACK,
+  REGISTERED
 };
 
 struct mqtt_sn_connection {
@@ -177,12 +197,16 @@ struct mqtt_sn_connection {
   puback_packet_t last_puback;
   disconnect_packet_t last_disconnect;
   const char* client_id;
-  enum connection_stat stat;
+  enum mqttsn_connection_status stat;
+  uint8_t connection_retries;
   struct process *client_process;
   const struct mqtt_sn_callbacks *mc;
 };
 
-
+struct mqttsn_topic {
+  uint16_t topic_id;
+  char topic_name[MQTT_SN_MAX_TOPIC_LENGTH];
+};
 
 #endif
 
@@ -193,14 +217,14 @@ int mqtt_sn_create_socket(struct mqtt_sn_connection *mqc, uint16_t local_port, u
 #if 1
 void mqtt_sn_send_connect(struct mqtt_sn_connection *mqc, const char* client_id, uint16_t keepalive);
 #endif
-#if 0
-void mqtt_sn_send_register(int sock, const char* topic_name);
+#if 1
+void mqtt_sn_send_register(struct mqtt_sn_connection *mqc, const char* topic_name);
 #endif
 #if 1
 void mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id, uint8_t topic_type, const char* data, uint16_t data_len, int8_t qos, uint8_t retain);
 #endif
-#if 0
-void mqtt_sn_send_subscribe(int sock, const char* topic_name, uint8_t qos);
+#if 1
+void mqtt_sn_send_subscribe(struct mqtt_sn_connection *mqc, const char* topic_name, uint8_t qos);
 #endif
 #if 1
 void mqtt_sn_send_pingreq(struct mqtt_sn_connection *mqc);
@@ -211,14 +235,14 @@ void mqtt_sn_send_pingresp(struct mqtt_sn_connection *mqc);
 #if 1
 void mqtt_sn_send_disconnect(struct mqtt_sn_connection *mqc);
 #endif
-#if 0
-void mqtt_sn_recieve_connack(int sock);
+#if 1
+void mqtt_sn_recieve_connack(struct mqtt_sn_connection *mqc);
 #endif
-#if 0
-uint16_t mqtt_sn_recieve_regack(int sock);
+#if 1
+uint16_t mqtt_sn_recieve_regack(struct mqtt_sn_connection *mqc);
 #endif
-#if 0
-uint16_t mqtt_sn_recieve_suback(int sock);
+#if 1
+uint16_t mqtt_sn_recieve_suback(struct mqtt_sn_connection *mqc);
 #endif
 #if 0
 publish_packet_t* mqtt_sn_loop(int sock, int timeout);

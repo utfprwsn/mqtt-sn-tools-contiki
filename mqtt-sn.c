@@ -185,6 +185,7 @@ int mqtt_sn_create_socket(struct mqtt_sn_connection *mqc, uint16_t local_port, u
   mqc->stat = DISCONNECTED;
   mqc->keep_alive=0;
   mqc->next_message_id = 1;
+  mqc->connection_retries = 0;
   process_start(&mqtt_sn_process, NULL);
   return 0;
 }
@@ -292,6 +293,7 @@ void mqtt_sn_send_connect(struct mqtt_sn_connection *mqc, const char* client_id,
         mqc->keep_alive = keepalive*CLOCK_SECOND;
     }
     mqc->stat = WAITING_ACK;
+    mqc->connection_retries++;
 
     return send_packet(mqc, (char*)&packet, packet.length);
 }
@@ -320,20 +322,20 @@ void mqtt_sn_send_register(struct mqtt_sn_connection *mqc, const char* topic_nam
 }
 #endif
 
-#if 0
-void mqtt_sn_send_regack(int sock, int topic_id, int mesage_id)
+#if 1
+void mqtt_sn_send_regack(struct mqtt_sn_connection *mqc, int topic_id, int message_id)
 {
     regack_packet_t packet;
     packet.type = MQTT_SN_TYPE_REGACK;
-    packet.topic_id = htons(topic_id);
-    packet.message_id = htons(mesage_id);
+    packet.topic_id = uip_htons(topic_id);
+    packet.message_id = uip_htons(mesage_id);
     packet.return_code = 0x00;
     packet.length = 0x07;
 
     if (debug)
-        fprintf(stderr, "Sending REGACK packet...\n");
+        printf("Sending REGACK packet...\n");
 
-    return send_packet(sock, (char*)&packet, packet.length);
+    return send_packet(mqc, (char*)&packet, packet.length);
 }
 #endif
 
@@ -383,8 +385,8 @@ void mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id, uin
     return send_packet(mqc, (char*)&packet, packet.length);
 }
 #endif
-#if 0
-void mqtt_sn_send_subscribe(int sock, const char* topic_name, uint8_t qos)
+#if 1
+void mqtt_sn_send_subscribe(struct mqtt_sn_connection *mqc, const char* topic_name, uint8_t qos)
 {
     subscribe_packet_t packet;
     size_t topic_name_len = strlen(topic_name);
@@ -397,20 +399,21 @@ void mqtt_sn_send_subscribe(int sock, const char* topic_name, uint8_t qos)
     } else {
         packet.flags += MQTT_SN_TOPIC_TYPE_NORMAL;
     }
-    packet.message_id = htons(next_message_id++);
+    packet.message_id = uip_htons(next_message_id++);
     strncpy(packet.topic_name, topic_name, sizeof(packet.topic_name));
     packet.topic_name[sizeof(packet.topic_name)-1] = '\0';
     packet.length = 0x05 + topic_name_len;
 
-    if (debug)
-        fprintf(stderr, "Sending SUBSCRIBE packet...\n");
+    if (debug){
+        printf("Sending SUBSCRIBE packet...\n");
+    }
 
-    return send_packet(sock, (char*)&packet, packet.length);
+    return send_packet(mqc, (char*)&packet, packet.length);
 
 }
 #endif
 #if 0
-void mqtt_sn_send_subscribe_topic_id(int sock, uint16_t topic_id, uint8_t qos)
+void mqtt_sn_send_subscribe_topic_id(struct mqtt_sn_connection *mqc, uint16_t topic_id, uint8_t qos)
 {
     subscribe_packet_t packet;
     packet.type = MQTT_SN_TYPE_SUBSCRIBE;
@@ -471,6 +474,7 @@ void mqtt_sn_send_disconnect(struct mqtt_sn_connection *mqc)
         printf("Sending DISCONNECT packet...\n");
 
     send_packet(mqc, (char*)&packet, packet.length);
+    mqc->connection_retries=0;
     process_post(&mqtt_sn_process, disconnect_event, mqc);
 }
 #endif
@@ -514,25 +518,26 @@ static int mqtt_sn_process_register(int sock, const register_packet_t *packet)
 
     return 0;
 }
-
+#endif
+#if 0
 void mqtt_sn_register_topic(int topic_id, const char* topic_name)
 {
     topic_map_t **ptr = &topic_map;
 
     // Check topic ID is valid
     if (topic_id == 0x0000 || topic_id == 0xFFFF) {
-        fprintf(stderr, "Error: attempted to register invalid topic id: 0x%4.4x\n", topic_id);
+        printf("Error: attempted to register invalid topic id: 0x%4.4x\n", topic_id);
         return;
     }
 
     // Check topic name is valid
     if (topic_name == NULL || strlen(topic_name) < 0) {
-        fprintf(stderr, "Error: attempted to register invalid topic name.\n");
+        printf("Error: attempted to register invalid topic name.\n");
         return;
     }
 
     if (debug)
-        fprintf(stderr, "Registering topic 0x%4.4x: %s\n", topic_id, topic_name);
+        printf("Registering topic 0x%4.4x: %s\n", topic_id, topic_name);
 
     // Look for the topic id
     while (*ptr) {
@@ -547,7 +552,7 @@ void mqtt_sn_register_topic(int topic_id, const char* topic_name)
     if (*ptr == NULL) {
         *ptr = (topic_map_t *)malloc(sizeof(topic_map_t));
         if (!*ptr) {
-            fprintf(stderr, "Error: Failed to allocate memory for new topic map entry.\n");
+            printf("Error: Failed to allocate memory for new topic map entry.\n");
             return;
         }
         (*ptr)->next = NULL;
