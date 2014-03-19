@@ -32,9 +32,6 @@ static publish_packet_t incoming_packet;
 static uint16_t ctrl_topic_msg_id;
 static uint16_t reg_topic_msg_id;
 static uint16_t mqtt_keep_alive=20;
-const char *message_data = NULL;
-static uint16_t topic_id = 0;
-static uint8_t topic_id_type = MQTT_SN_TOPIC_TYPE_SHORT;
 static int8_t qos = 1;
 uint8_t retain = FALSE;
 //uint8_t debug = FALSE;
@@ -73,11 +70,7 @@ static process_event_t mqttsn_connack_event;
 static process_event_t mqttsn_regack_event;
 static process_event_t ctrl_suback_event;
 
-/*---------------------------------------------------------------------------*/
-PROCESS(example_mqttsn_process, "Configure Connection and Topic Registration");
 
-PROCESS(publish_process, "publish data to the broker");
-AUTOSTART_PROCESSES(&example_mqttsn_process);
 /*---------------------------------------------------------------------------*/
 static void
 puback_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen)
@@ -170,9 +163,10 @@ PROCESS_THREAD(publish_process, ev, data)
   static struct etimer send_timer;
   static uint8_t buf_len;
   static char buf[20];
+
   PROCESS_BEGIN();
+
   mqttsn_regack_event = process_alloc_event();
-  //register topic
   printf("registering topic\n");
   registration_tries =0;
   registration_timeout_event = process_alloc_event();
@@ -190,7 +184,6 @@ PROCESS_THREAD(publish_process, ev, data)
     else if (ev == mqttsn_regack_event)
     {
       //if success
-      registration_tries = 0;
       printf("registration acked\n");
       ctimer_stop(&registration_timer);
       registration_state = MQTTSN_REGISTERED;
@@ -207,8 +200,7 @@ PROCESS_THREAD(publish_process, ev, data)
       sprintf(buf, "Message %d", message_number);
       message_number++;
       buf_len = strlen(buf);
-      topic_id = (topic_name[0] << 8) + topic_name[1];
-      mqtt_sn_send_publish(&mqtt_sn_c, topic_id,topic_id_type,buf, buf_len,qos,retain);
+      mqtt_sn_send_publish(&mqtt_sn_c, publisher_topic_id,MQTT_SN_TOPIC_TYPE_NORMAL,buf, buf_len,qos,retain);
       etimer_reset(&send_timer);
     }
   } else {
@@ -255,7 +247,6 @@ PROCESS_THREAD(ctrl_subsciption_process, ev, data)
     else if (ev == ctrl_suback_event)
     {
       //if success
-      subscription_tries = 0;
       printf("subscription to control topic acked\n");
       ctimer_stop(&subscription_timer);
       ctrl_subscription_state = CTRL_SUBSCRIBED;
@@ -272,6 +263,10 @@ PROCESS_THREAD(ctrl_subsciption_process, ev, data)
 
 /*---------------------------------------------------------------------------*/
 /*this main process will create connection and register topics*/
+/*---------------------------------------------------------------------------*/
+PROCESS(example_mqttsn_process, "Configure Connection and Topic Registration");
+AUTOSTART_PROCESSES(&example_mqttsn_process);
+
 static struct ctimer connection_timer;
 static process_event_t connection_timeout_event;
 
@@ -284,13 +279,7 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
 {
   static struct etimer periodic_timer;
   static uip_ipaddr_t broker_addr;
-
-
-  static char ctrl_topic[25];
-  static uint8_t ctrl_channel_status = 0;
-  static uint8_t mqttsn_retries = 0;
-
-
+  static uint8_t connection_retries = 0;
 
   PROCESS_BEGIN();
 
@@ -311,7 +300,7 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
 
   /*Request a connection and wait for connack*/
   printf("requesting connection \n ");
-  while (mqttsn_retries < 4)
+  while (connection_retries < 4)
   {
     mqtt_sn_send_connect(&mqtt_sn_c,mqtt_client_id,mqtt_keep_alive);
     PROCESS_WAIT_EVENT();
