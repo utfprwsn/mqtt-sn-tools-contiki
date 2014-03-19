@@ -7,7 +7,7 @@
 //#include "net/uip-debug.h"
 #include "mqtt-sn.h"
 
-#include "node-id.h"
+#include "net/rime.h"
 
 #include "simple-udp.h"
 //#include "servreg-hack.h"
@@ -20,10 +20,17 @@
 
 #define SEND_INTERVAL		(10 * CLOCK_SECOND)
 #define SEND_TIME		(random_rand() % (SEND_INTERVAL))
+#define REPLY_TIMEOUT (3 * CLOCK_SECOND)
 
 static struct mqtt_sn_connection mqtt_sn_c;
 static char *mqtt_client_id="sensor";
 static char topic_name[]="AR";
+static char ctrl_topic[21] = "0000000000000000/ctrl";//of form "0011223344556677/ctrl" it is not null terminated, and is 21 charactes
+static uint16_t ctrl_topic_id;
+static uint16_t publisher_topic_id;
+static publish_packet_t incoming_packet;
+static uint16_t ctrl_topic_msg_id;
+static uint16_t reg_topic_msg_id;
 static uint16_t mqtt_keep_alive=20;
 const char *message_data = NULL;
 static uint16_t topic_id = 0;
@@ -34,19 +41,19 @@ uint8_t retain = FALSE;
 
 enum mqttsn_connection_status
 {
-  DISCONNECTED =0,
-  WAITING_CONNACK,
-  CONNECTION_FAILED,
-  CONNECTED
+  MQTTSN_DISCONNECTED =0,
+  MQTTSN_WAITING_CONNACK,
+  MQTTSN_CONNECTION_FAILED,
+  MQTTSN_CONNECTED
 };
 
 enum topic_registration_status
 {
-  UNREGISTERED = 0,
-  WAITING_REGACK,
-  WAITING_TOPIC_ID,
-  REGISTER_FAILED,
-  REGISTERED
+  MQTTSN_UNREGISTERED = 0,
+  MQTTSN_WAITING_REGACK,
+  MQTTSN_WAITING_TOPIC_ID,
+  MQTTSN_REGISTER_FAILED,
+  MQTTSN_REGISTERED
 };
 
 enum ctrl_subscription_status
@@ -57,17 +64,20 @@ enum ctrl_subscription_status
   CTRL_SUBSCRIBED
 };
 
+static enum mqttsn_connection_status connection_state = DISCONNECTED;
+static enum topic_registration_status registration_state = UNREGISTERED;
+static enum ctrl_subscription_status ctrl_subscription_state = CTRL_UNSUBSCRIBED;
 
 /*A few events for managing device state*/
 static process_event_t mqttsn_connack_event;
 static process_event_t mqttsn_regack_event;
-static process_event_t mqttsn_suback_event;
-
+static process_event_t ctrl_suback_event;
 
 /*---------------------------------------------------------------------------*/
-PROCESS(unicast_sender_process, "Unicast sender example process");
-PROCESS(ctrl_subsciption_process, "subscribe to a device control channel");
-AUTOSTART_PROCESSES(&unicast_sender_process);
+PROCESS(example_mqttsn_process, "Configure Connection and Topic Registration");
+
+PROCESS(publish_process, "publish data to the broker");
+AUTOSTART_PROCESSES(&example_mqttsn_process);
 /*---------------------------------------------------------------------------*/
 static void
 puback_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen)
@@ -78,111 +88,222 @@ puback_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr,
 static void
 connack_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen)
 {
+
   printf("Connack received\n");
 }
 /*---------------------------------------------------------------------------*/
 static void
-set_global_address(void)
+regack_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen)
 {
-  uip_ipaddr_t ipaddr;
-  int i;
-  uint8_t state;
-
-  uip_ip6addr(&ipaddr, 0xaaaa, 0, 0, 0, 0, 0, 0, 0);
-  uip_ds6_set_addr_iid(&ipaddr, &uip_lladdr);
-  uip_ds6_addr_add(&ipaddr, 0, ADDR_AUTOCONF);
-
-  printf("IPv6 addresses: ");
-  for(i = 0; i < UIP_DS6_ADDR_NB; i++) {
-    state = uip_ds6_if.addr_list[i].state;
-    if(uip_ds6_if.addr_list[i].isused &&
-       (state == ADDR_TENTATIVE || state == ADDR_PREFERRED)) {
-      //uip_debug_ipaddr_print(&uip_ds6_if.addr_list[i].ipaddr);
-      printf("\n");
+  uint16_t incoming_message_id;
+  regack_packet_t incoming_regack;
+  memcpy(&incoming_regack, data, datalen);
+  printf("Regack received\n");
+  if (incoming_regack.message_id == reg_topic_msg_id) {
+    if (incoming_regack.return_code == ACCEPTED) {
+      publisher_topic_id = incoming_regack.topic_id;
+      process_post(&publish_process,mqttsn_regack_event, NULL);
+    } else {
+      printf("Regack error: %s\n", mqtt_sn_return_code_string(packet->return_code));
     }
   }
 }
 /*---------------------------------------------------------------------------*/
 static void
-sprintf_eui(void)
+suback_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen)
 {
-  sprintf(macs48,"%02X-%02X-%02X-%02X-%02X-%02X",
-                            dev_eth_addr.addr[0],
-                            dev_eth_addr.addr[1],
-                            dev_eth_addr.addr[2],
-                            dev_eth_addr.addr[3],
-                            dev_eth_addr.addr[4],
-                            dev_eth_addr.addr[5]);
+  uint16_t incoming_message_id;
+  suback_packet_t incoming_suback;
+  memcpy(&incoming_suback, data, datalen);
+  printf("Suback received\n");
+  if (incoming_suback.message_id == ctrl_topic_msg_id) {
+    if (incoming_suback.return_code == ACCEPTED) {
+      ctrl_topic_id = incoming_suback.topic_id;
+      process_post(&ctrl_subscription_process,ctrl_suback_event, NULL);
+    } else {
+      printf("Suback error: %s\n", mqtt_sn_return_code_string(packet->return_code));
+    }
+  }
 }
+/*---------------------------------------------------------------------------*/
+static void
+publish_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen)
+{
+  memcpy(&incoming_packet, data, datalen);
+  printf("Published message received\n");
+  //see if this message corresponds to ctrl channel subscription request
+  if (incoming_packet.topic_id == ctrl_topic_id) {
+    //do something with incoming data here
+  } else {
+    printf("unknown publication received\n")'
+  }
 
-
+}
 /*---------------------------------------------------------------------------*/
 /*Add callbacks here if we make them*/
-static const struct mqtt_sn_callbacks mqtt_sn_call = {NULL,NULL,connack_receiver,NULL,puback_receiver,NULL};
-
+static const struct mqtt_sn_callbacks mqtt_sn_call = {
+  publish_receiver,
+  NULL,
+  NULL,
+  connack_receiver,
+  regack_receiver,
+  puback_receiver,
+  suback_receiver,
+  NULL,
+  NULL
+  };
 
 /*---------------------------------------------------------------------------*/
-PROCESS_THREAD(mqttsn_subscription_process, ev, data)
+/*this process will publish data at regular intervals*/
+PROCESS(publish_process, "register topic and publish data");
+static struct ctimer registration_timer;
+static process_event_t registration_timeout_event;
+
+static void registration_timer_callback(void *mqc)
 {
+  process_post(&publish_process, registration_timeout_event, NULL);
+}
 
-  static struct etimer subscription_timeout;
-  static char ctrl_topic[21];//of form "0011223344556677/ctrl" it is not null terminated, and is 21 charactes
-
+PROCESS_THREAD(publish_process, ev, data)
+{
+  static uint8_t registration_tries;
+  static struct etimer send_timer;
+  static uint8_t buf_len;
+  static char buf[20];
   PROCESS_BEGIN();
-  etimer_set(&subscription_timeout, SEND_TIME);
-  while(1) {
-
-
-    PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&subscription_timeout));
-
+  mqttsn_regack_event = process_alloc_event();
+  //register topic
+  printf("registering topic\n");
+  registration_tries =0;
+  registration_timeout_event = process_alloc_event();
+  ctimer_set( &registration_timer, REPLY_TIMEOUT, registration_timer_callback, NULL);
+  while (registration_tries < 4)
+  {
+    PROCESS_WAIT_EVENT();
+    if (ev == registration_timeout_event)
+    {
+      registration_state = MQTTSN_REGISTER_FAILED;
+      registration_tries++;
+      printf("registration timeout\n");
+      ctimer_restart(&registration_timer);
+    }
+    else if (ev == mqttsn_regack_event)
+    {
+      //if success
+      registration_tries = 0;
+      printf("registration acked\n");
+      ctimer_stop(&registration_timer);
+      registration_state = MQTTSN_REGISTERED;
+      registration tries = 4;//using break here may mess up switch statement of process
+    }
+  }
+  ctimer_stop(&registration_timer);
+  if (registration_state == MQTTSN_REGISTERED){
+    //start topic publishing to topic at regular intervals
+    while(1)
+    {
+      PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&send_timer));
+      printf("publishing \n ");
+      sprintf(buf, "Message %d", message_number);
+      message_number++;
+      buf_len = strlen(buf);
+      topic_id = (topic_name[0] << 8) + topic_name[1];
+      mqtt_sn_send_publish(&mqtt_sn_c, topic_id,topic_id_type,buf, buf_len,qos,retain);
+      etimer_reset(&send_timer);
+    }
+  } else {
+    printf("unable to register topic\n")
   }
 
   PROCESS_END();
 }
 
 /*---------------------------------------------------------------------------*/
-PROCESS_THREAD(unicast_sender_process, ev, data)
+/*this process will create a subscription and monitor for incoming traffic*/
+PROCESS(ctrl_subsciption_process, "subscribe to a device control channel");
+static struct ctimer subscription_timer;
+static process_event_t subscription_timeout_event;
+
+static void subscription_timer_callback(void *mqc)
+{
+  process_post(&ctrl_subsciption_process, subscription_timeout_event, NULL);
+}
+
+PROCESS_THREAD(ctrl_subsciption_process, ev, data)
+{
+  char device_id[17];
+  static uint8_t subscription_tries;
+  PROCESS_BEGIN();
+  ctrl_suback_event = process_alloc_event();
+  subscription_tries = 0;
+  sprintf(device_id,"%02X%02X%02X%02X%02X%02X%02X%02X",rimeaddr_node_addr);
+  memcpy(ctrl_topic,device_id,16);
+  subscription_timeout_event = process_alloc_event();
+  ctimer_set( &subscription_timer, REPLY_TIMEOUT, subscription_timer_callback, NULL);
+  while(subscription_tries < 10) {
+    //request subscription
+    ctrl_topic_msg_id = mqtt_sn_send_subscribe(mqtt_sn_c,ctrl_topic,0);//QOS 1 currently unsupported on client
+    ctrl_subscription_state = CTRL_WAITING_SUBACK;
+    PROCESS_WAIT_EVENT();
+    if (ev == subscription_timeout_event)
+    {
+      ctrl_subscription_state = CTRL_SUBSCRIBE_FAILED;
+      subscription_tries++;
+      printf("subscription timeout\n");
+      ctimer_restart(&subscription_timer);
+    }
+    else if (ev == ctrl_suback_event)
+    {
+      //if success
+      subscription_tries = 0;
+      printf("subscription to control topic acked\n");
+      ctimer_stop(&subscription_timer);
+      ctrl_subscription_state = CTRL_SUBSCRIBED;
+      subscription tries = 10;//using break here may mess up switch statement of process
+    }
+  }
+  if (ctrl_subscription_state != CTRL_SUBSCRIBED) {
+    printf("subscription to control topic failed\n");
+  }
+  ctimer_stop(&subscription_timer);
+
+  PROCESS_END();
+}
+
+/*---------------------------------------------------------------------------*/
+/*this main process will create connection and register topics*/
+static struct ctimer connection_timer;
+static process_event_t connection_timeout_event;
+
+static void connection_timer_callback(void *mqc)
+{
+  process_post(&ctrl_subsciption_process, connection_timeout_event, NULL);
+}
+
+PROCESS_THREAD(example_mqttsn_process, ev, data)
 {
   static struct etimer periodic_timer;
-  static struct etimer send_timer;
-  static struct ctimer mqttsn_timeout;
-  static uip_ipaddr_t addr;
+  static uip_ipaddr_t broker_addr;
 
-  static uint8_t buf_len;
-  static unsigned int message_number;
-  static char buf[20];
+
   static char ctrl_topic[25];
   static uint8_t ctrl_channel_status = 0;
   static uint8_t mqttsn_retries = 0;
 
-  static enum mqttsn_connection_status connection_state = DISCONNECTED;
-  static enum topic_registration_status registration_state = UNREGISTERED;
-  static enum ctrl_subscription_status ctrl_subscription_state = CTRL_UNSUBSCRIBED;
+
 
   PROCESS_BEGIN();
 
   mqttsn_connack_event = process_alloc_event();
-  mqttsn_regack_event = process_alloc_event();
-  mqttsn_suback_event = process_alloc_event();
 
-  //servreg_hack_init();
-
-  set_global_address();
   mqtt_sn_set_debug(1);
-  //send to TUN interface for cooja simulation
-  //uip_ip6addr(&addr, 0xaaaa, 0, 0, 0, 0, 0, 0, 1);
-  //uip_ip6addr(&addr, 0x2001, 0x0db8, 1, 0xffff, 0, 0, 0xc0a8, 0xd480);//192.168.212.128 with tayga
-  //uip_ip6addr(&addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xc0a8, 0xd480);//192.168.212.128 with tayga
-  //uip_ip6addr(&addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xac10, 0xdc01);//172.16.220.1 with tayga
-  uip_ip6addr(&addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xac10, 0xdc80);//172.16.220.128 with tayga
-  mqtt_sn_create_socket(&mqtt_sn_c,35555, &addr, UDP_PORT);
+  //uip_ip6addr(&broker_addr, 0xaaaa, 0, 0, 0, 0, 0, 0, 1);
+  //uip_ip6addr(&broker_addr, 0x2001, 0x0db8, 1, 0xffff, 0, 0, 0xc0a8, 0xd480);//192.168.212.128 with tayga
+  //uip_ip6addr(&broker_addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xc0a8, 0xd480);//192.168.212.128 with tayga
+  //uip_ip6addr(&broker_addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xac10, 0xdc01);//172.16.220.1 with tayga
+  uip_ip6addr(&broker_addr, 0xaaaa, 0, 2, 0xeeee, 0, 0, 0xac10, 0xdc80);//172.16.220.128 with tayga
+  mqtt_sn_create_socket(&mqtt_sn_c,35555, &broker_addr, UDP_PORT);
   (&mqtt_sn_c)->mc = &mqtt_sn_call;
-
-
-
-  //connect, presume ack comes before timer fires
-  //mqtt_sn_send_connect(&unicast_connection,mqtt_client_id,mqtt_keep_alive);
-
 
   /*Wait a little to let system get set*/
   etimer_set(&periodic_timer, 10*CLOCK_SECOND);
@@ -190,47 +311,31 @@ PROCESS_THREAD(unicast_sender_process, ev, data)
 
   /*Request a connection and wait for connack*/
   printf("requesting connection \n ");
-  for(mqttsn_retries =0; mqttsn_retries++
-  mqtt_sn_send_connect(&mqtt_sn_c,mqtt_client_id,mqtt_keep_alive);
+  while (mqttsn_retries < 4)
+  {
+    mqtt_sn_send_connect(&mqtt_sn_c,mqtt_client_id,mqtt_keep_alive);
+    PROCESS_WAIT_EVENT();
+    if (ev == connack_event) {
 
-  etimer_set(&periodic_timer, 4*CLOCK_SECOND);
-  PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&periodic_timer));
-  printf("subscribing to control channel \n ");
-  while (ctrl_channel_status=0){
-   mqtt_sn_send_subscribe(&mqtt_sn_c,ctrl_topic,1);
+    }
+    if (ev == timeout_event) {
+
+    }
+  }
+  if (connection_state == MQTTSN_CONNECTED){
+    //start topic subscription process
+    //start topic publish process
+    //monitor connection
+    while(1)
+    {
+      PROCESS_WAIT_EVENT();
+    }
+  } else {
+    printf("unable to connect\n")
   }
 
-//  etimer_set(&periodic_timer, 4*CLOCK_SECOND);
-//  PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&periodic_timer));
-//  printf("registering topic\n ");
-
-  //etimer_reset(&periodic_timer);
-  etimer_set(&send_timer, SEND_TIME);
-  while(1) {
 
 
-    PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&send_timer));
-    printf("publishing \n ");
-    //addr = servreg_hack_lookup(SERVICE_ID);
-    //if(addr != NULL) {
-
-
-//      printf("Sending unicast to ");
-//      uip_debug_ipaddr_print(&addr);
-//      printf("\n");
-      sprintf(buf, "Message %d", message_number);
-      message_number++;
-      buf_len = strlen(buf);
-
-      topic_id = (topic_name[0] << 8) + topic_name[1];
-
-      mqtt_sn_send_publish(&mqtt_sn_c, topic_id,topic_id_type,buf, buf_len,qos,retain);
-      etimer_reset(&send_timer);
-      //simple_udp_sendto(&unicast_connection, buf, strlen(buf) + 1, addr);
-    //} else {
-     // printf("Service %d not found\n", SERVICE_ID);
-   // }
-  }
 
   PROCESS_END();
 }

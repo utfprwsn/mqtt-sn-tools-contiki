@@ -159,11 +159,13 @@ typedef struct topic_map {
 struct mqtt_sn_connection;
 struct mqtt_sn_callbacks {
   /** Called when a packet has been received by the mqtt_sn module or other event needs handled */
+  void (* pub_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* pingreq_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* pingresp_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* connack_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* regack_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* puback_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
+  void (* suback_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* disconnect_recv)(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr, const uint8_t *data, uint16_t datalen);
   void (* keepalive_timeout)(struct mqtt_sn_connection *mqc);
 };
@@ -218,13 +220,14 @@ int mqtt_sn_create_socket(struct mqtt_sn_connection *mqc, uint16_t local_port, u
 void mqtt_sn_send_connect(struct mqtt_sn_connection *mqc, const char* client_id, uint16_t keepalive);
 #endif
 #if 1
-void mqtt_sn_send_register(struct mqtt_sn_connection *mqc, const char* topic_name);
+uint16_t mqtt_sn_send_register(struct mqtt_sn_connection *mqc, const char* topic_name);
 #endif
 #if 1
-void mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id, uint8_t topic_type, const char* data, uint16_t data_len, int8_t qos, uint8_t retain);
+uint16_t mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id, uint8_t topic_type, const char* data, uint16_t data_len, int8_t qos, uint8_t retain);
 #endif
 #if 1
-void mqtt_sn_send_subscribe(struct mqtt_sn_connection *mqc, const char* topic_name, uint8_t qos);
+uint16_t mqtt_sn_send_subscribe(struct mqtt_sn_connection *mqc, const char* topic_name, uint8_t qos);
+uint16_t mqtt_sn_send_subscribe_topic_id(struct mqtt_sn_connection *mqc, uint16_t topic_id, uint8_t qos);
 #endif
 #if 1
 void mqtt_sn_send_pingreq(struct mqtt_sn_connection *mqc);
@@ -235,13 +238,13 @@ void mqtt_sn_send_pingresp(struct mqtt_sn_connection *mqc);
 #if 1
 void mqtt_sn_send_disconnect(struct mqtt_sn_connection *mqc);
 #endif
-#if 1
+#if 0
 void mqtt_sn_recieve_connack(struct mqtt_sn_connection *mqc);
 #endif
-#if 1
+#if 0
 uint16_t mqtt_sn_recieve_regack(struct mqtt_sn_connection *mqc);
 #endif
-#if 1
+#if 0
 uint16_t mqtt_sn_recieve_suback(struct mqtt_sn_connection *mqc);
 #endif
 #if 0

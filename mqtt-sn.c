@@ -122,7 +122,13 @@ mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_
             }
             break;
           }
-//        case MQTT_SN_TYPE_PUBLISH:
+        case MQTT_SN_TYPE_PUBLISH:
+          {
+            if(mqc->mc->pub_recv != NULL) {
+              mqc->mc->pub_recv(mqc, receiver_addr, data, datalen);
+            }
+            break;
+          }
         case MQTT_SN_TYPE_PUBACK:
           {
             memcpy(&mqc->last_puback,data,sizeof(puback_packet_t));
@@ -135,7 +141,13 @@ mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_
 //        case MQTT_SN_TYPE_PUBREC:
 //        case MQTT_SN_TYPE_PUBREL:
 //        case MQTT_SN_TYPE_SUBSCRIBE:
-//        case MQTT_SN_TYPE_SUBACK:
+        case MQTT_SN_TYPE_SUBACK:
+          {
+            if(mqc->mc->suback_recv != NULL) {
+              mqc->mc->suback_recv(mqc, receiver_addr, data, datalen);
+            }
+            break;
+          }
 //        case MQTT_SN_TYPE_UNSUBSCRIBE:
 //        case MQTT_SN_TYPE_UNSUBACK:
         case MQTT_SN_TYPE_PINGREQ:
@@ -299,7 +311,7 @@ void mqtt_sn_send_connect(struct mqtt_sn_connection *mqc, const char* client_id,
 }
 #endif
 #if 1
-void mqtt_sn_send_register(struct mqtt_sn_connection *mqc, const char* topic_name)
+uint16_t mqtt_sn_send_register(struct mqtt_sn_connection *mqc, const char* topic_name)
 {
     register_packet_t packet;
     size_t topic_name_len = strlen(topic_name);
@@ -318,12 +330,13 @@ void mqtt_sn_send_register(struct mqtt_sn_connection *mqc, const char* topic_nam
     if (debug)
         printf("Sending REGISTER packet...\n");
 
-    return send_packet(mqc, (char*)&packet, packet.length);
+    send_packet(mqc, (char*)&packet, packet.length);
+    return packet.message_id;
 }
 #endif
 
 #if 1
-void mqtt_sn_send_regack(struct mqtt_sn_connection *mqc, int topic_id, int message_id)
+uint16_t mqtt_sn_send_regack(struct mqtt_sn_connection *mqc, int topic_id, int message_id)
 {
     regack_packet_t packet;
     packet.type = MQTT_SN_TYPE_REGACK;
@@ -335,7 +348,8 @@ void mqtt_sn_send_regack(struct mqtt_sn_connection *mqc, int topic_id, int messa
     if (debug)
         printf("Sending REGACK packet...\n");
 
-    return send_packet(mqc, (char*)&packet, packet.length);
+    send_packet(mqc, (char*)&packet, packet.length);
+    return packet.message_id;
 }
 #endif
 
@@ -355,7 +369,7 @@ static uint8_t mqtt_sn_get_qos_flag(int8_t qos)
     }
 }
 #if 1
-void mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id, uint8_t topic_type, const char* data, uint16_t data_len, int8_t qos, uint8_t retain)
+uint16_t mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id, uint8_t topic_type, const char* data, uint16_t data_len, int8_t qos, uint8_t retain)
 {
     publish_packet_t packet;
 
@@ -382,11 +396,12 @@ void mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id, uin
         }
     }
 
-    return send_packet(mqc, (char*)&packet, packet.length);
+    send_packet(mqc, (char*)&packet, packet.length);
+    return packet.message_id;
 }
 #endif
 #if 1
-void mqtt_sn_send_subscribe(struct mqtt_sn_connection *mqc, const char* topic_name, uint8_t qos)
+uint16_t mqtt_sn_send_subscribe(struct mqtt_sn_connection *mqc, const char* topic_name, uint8_t qos)
 {
     subscribe_packet_t packet;
     size_t topic_name_len = strlen(topic_name);
@@ -399,7 +414,7 @@ void mqtt_sn_send_subscribe(struct mqtt_sn_connection *mqc, const char* topic_na
     } else {
         packet.flags += MQTT_SN_TOPIC_TYPE_NORMAL;
     }
-    packet.message_id = uip_htons(next_message_id++);
+    packet.message_id = uip_htons(mqc->next_message_id++);
     strncpy(packet.topic_name, topic_name, sizeof(packet.topic_name));
     packet.topic_name[sizeof(packet.topic_name)-1] = '\0';
     packet.length = 0x05 + topic_name_len;
@@ -408,8 +423,8 @@ void mqtt_sn_send_subscribe(struct mqtt_sn_connection *mqc, const char* topic_na
         printf("Sending SUBSCRIBE packet...\n");
     }
 
-    return send_packet(mqc, (char*)&packet, packet.length);
-
+    send_packet(mqc, (char*)&packet, packet.length);
+    return packet.message_id;
 }
 #endif
 #if 0
@@ -420,7 +435,7 @@ void mqtt_sn_send_subscribe_topic_id(struct mqtt_sn_connection *mqc, uint16_t to
     packet.flags = 0x00;
     packet.flags += mqtt_sn_get_qos_flag(qos);
     packet.flags += MQTT_SN_TOPIC_TYPE_PREDEFINED;
-    packet.message_id = htons(next_message_id++);
+    packet.message_id = htons(mqc->next_message_id++);
     packet.topic_id = htons(topic_id);
     packet.length = 0x05 + 2;
 
