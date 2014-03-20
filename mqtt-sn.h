@@ -170,14 +170,13 @@ struct mqtt_sn_callbacks {
   void (* keepalive_timeout)(struct mqtt_sn_connection *mqc);
 };
 
-enum mqttsn_connection_status {
-    CONNECTED=0,
-    REJECTED_CONGESTION,
-    REJECTED_INVALID_TOPIC_,
-    REJECTED_NOT_SUPPORTED,
-    DISCONNECTED,
-    WAITING_ACK,
-    CONNECTION_FAILED
+
+enum mqttsn_connection_status
+{
+  MQTTSN_DISCONNECTED =0,
+  MQTTSN_WAITING_CONNACK,
+  MQTTSN_CONNECTION_FAILED,
+  MQTTSN_CONNECTED
 };
 
 enum topic_status {
@@ -238,6 +237,11 @@ void mqtt_sn_send_pingresp(struct mqtt_sn_connection *mqc);
 #if 1
 void mqtt_sn_send_disconnect(struct mqtt_sn_connection *mqc);
 #endif
+#if 1
+const char* mqtt_sn_type_string(uint8_t type);
+const char* mqtt_sn_return_code_string(uint8_t return_code);
+void mqtt_sn_set_debug(uint8_t value);
+#endif // 1
 #if 0
 void mqtt_sn_recieve_connack(struct mqtt_sn_connection *mqc);
 #endif
@@ -255,8 +259,7 @@ void mqtt_sn_register_topic(int topic_id, const char* topic_name);
 const char* mqtt_sn_lookup_topic(int topic_id);
 void mqtt_sn_cleanup();
 
-void mqtt_sn_set_debug(uint8_t value);
-const char* mqtt_sn_type_string(uint8_t type);
-const char* mqtt_sn_return_code_string(uint8_t return_code);
+
+
 
 #endif

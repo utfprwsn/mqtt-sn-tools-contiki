@@ -87,7 +87,7 @@ mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_
 {
   uint8_t msg_type;
   struct mqtt_sn_connection *mqc = (struct mqtt_sn_connection *)sock;
-  if (mqc->keep_alive > 0 && mqc->stat == CONNECTED){
+  if (mqc->keep_alive > 0 && mqc->stat == MQTTSN_CONNECTED){
     ctimer_restart((&(mqc->receive_timer)));
     printf("recieve timer reset\n");
   }
@@ -194,7 +194,7 @@ mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_
 int mqtt_sn_create_socket(struct mqtt_sn_connection *mqc, uint16_t local_port, uip_ipaddr_t *remote_addr, uint16_t remote_port)
 {
   simple_udp_register(&(mqc->sock), local_port, remote_addr, remote_port, mqtt_sn_receiver);
-  mqc->stat = DISCONNECTED;
+  mqc->stat = MQTTSN_DISCONNECTED;
   mqc->keep_alive=0;
   mqc->next_message_id = 1;
   mqc->connection_retries = 0;
@@ -228,8 +228,8 @@ PROCESS_THREAD(mqtt_sn_process, ev, data)
     mqc = (struct mqtt_sn_connection *)data;
     if(ev == connack_event) {
       //if connection was succesful, set and or start the ctimers.
-      if (mqc->last_connack.return_code == 0x00 && mqc->stat == WAITING_ACK){
-        mqc->stat = CONNECTED;
+      if (mqc->last_connack.return_code == 0x00 && mqc->stat == MQTTSN_WAITING_CONNACK){
+        mqc->stat = MQTTSN_CONNECTED;
         if (mqc->keep_alive > 0){
           ctimer_set(&mqc->receive_timer, mqc->keep_alive * 2, receive_timer_callback, mqc);
           ctimer_set(&mqc->send_timer,mqc->keep_alive / 2,send_timer_callback, mqc);
@@ -242,7 +242,7 @@ PROCESS_THREAD(mqtt_sn_process, ev, data)
         ctimer_stop(&(mqc->receive_timer));
         ctimer_stop(&(mqc->send_timer));
       }
-      mqc->stat = DISCONNECTED;
+      mqc->stat = MQTTSN_DISCONNECTED;
     }
     else if (ev == receive_timeout_event){
       //if last receive has expired we need to stop and disconnect
@@ -265,7 +265,7 @@ PROCESS_THREAD(mqtt_sn_process, ev, data)
 static void send_packet(struct mqtt_sn_connection *mqc, char* data, size_t len)
 {
   simple_udp_send(&(mqc->sock), data, len);//these datatypes should all cast fine
-  if (mqc->keep_alive>0 && mqc->stat == CONNECTED)
+  if (mqc->keep_alive>0 && mqc->stat == MQTTSN_CONNECTED)
   {
     //normally we would use this to make sure that we are always sending data to keep the connection alive
     //but since the gateway does not support pubacks, we will always be relying on a
@@ -304,7 +304,7 @@ void mqtt_sn_send_connect(struct mqtt_sn_connection *mqc, const char* client_id,
     if (keepalive) {
         mqc->keep_alive = keepalive*CLOCK_SECOND;
     }
-    mqc->stat = WAITING_ACK;
+    mqc->stat = MQTTSN_WAITING_CONNACK;
     mqc->connection_retries++;
 
     return send_packet(mqc, (char*)&packet, packet.length);
@@ -318,7 +318,7 @@ uint16_t mqtt_sn_send_register(struct mqtt_sn_connection *mqc, const char* topic
 
     if (topic_name_len > MQTT_SN_MAX_TOPIC_LENGTH) {
         printf("Error: topic name is too long\n");
-        return;
+        return 0;
     }
 
     packet.type = MQTT_SN_TYPE_REGISTER;
@@ -341,7 +341,7 @@ uint16_t mqtt_sn_send_regack(struct mqtt_sn_connection *mqc, int topic_id, int m
     regack_packet_t packet;
     packet.type = MQTT_SN_TYPE_REGACK;
     packet.topic_id = uip_htons(topic_id);
-    packet.message_id = uip_htons(mesage_id);
+    packet.message_id = uip_htons(message_id);
     packet.return_code = 0x00;
     packet.length = 0x07;
 
@@ -375,7 +375,7 @@ uint16_t mqtt_sn_send_publish(struct mqtt_sn_connection *mqc, uint16_t topic_id,
 
     if (data_len > sizeof(packet.data)) {
         printf("Error: payload is too big\n");
-        return;
+        return 0;
     }
 
     packet.type = MQTT_SN_TYPE_PUBLISH;
