@@ -39,10 +39,6 @@
 #endif
 
 static uint8_t debug = FALSE;
-//static uint16_t next_message_id = 1;
-//static time_t last_transmit = 0;
-//static time_t last_receive = 0;
-//static time_t keep_alive = 0;
 
 topic_map_t *topic_map = NULL;
 
@@ -67,7 +63,6 @@ static process_event_t receive_timeout_event;
 static process_event_t send_timeout_event;
 
 PROCESS(mqtt_sn_process, "MQTT_SN process");
-//AUTOSTART_PROCESSES(&mqtt_sn_process);
 
 #if 1
 void mqtt_sn_set_debug(uint8_t value)
