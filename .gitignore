@@ -6,3 +6,5 @@ oldMakefile
 *.cscope*
 *.layout
 *.cbp
+symbols.*
+

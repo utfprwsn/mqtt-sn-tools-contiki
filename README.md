@@ -1,4 +1,4 @@
-Command line tools written in C for the MQTT-SN (MQTT for Sensor Networks) protocol.
+Adaptation of mqtt-sn tools to be used on Contiki devices.
 
 Supported Features
 ------------------
@@ -17,6 +17,7 @@ Supported Features
 Limitations
 -----------
 
+- Currently there is no mqtt-sn gateway that supports IPv6, use NAT64
 - Packets must be 255 or less bytes long
 - No Last Will and Testament
 - No QoS 1 or 2
@@ -26,41 +27,16 @@ Limitations
 Building
 --------
 
-Just run 'make' on a POSIX system.
+Standard Contiki build instructions apply
 
 
-Publishing
-----------
+Example Client
+--------------
+The example client demonstrates a client connects, registers a topic, 
+published a topic, and subscribes to a topic.
 
-    Usage: mqtt-sn-pub [opts] -t <topic> -m <message>
-
-      -d             Enable debug messages.
-      -h <host>      MQTT-SN host to connect to. Defaults to '127.0.0.1'.
-      -i <clientid>  ID to use for this client. Defaults to 'mqtt-sn-tools-' with process id.
-      -m <message>   Message payload to send.
-      -n             Send a null (zero length) message.
-      -p <port>      Network port to connect to. Defaults to 1883.
-      -q <qos>       Quality of Service value (0 or -1). Defaults to 0.
-      -r             Message should be retained.
-      -t <topic>     MQTT topic name to publish to.
-      -T <topicid>   Pre-defined MQTT-SN topic ID to publish to.
-
-
-Subscribing
------------
-
-    Usage: mqtt-sn-sub [opts] -t <topic>
-
-      -1             exit after receiving a single message.
-      -c             disable 'clean session' (store subscription and pending messages when client disconnects).
-      -d             Enable debug messages.
-      -h <host>      MQTT-SN host to connect to. Defaults to '127.0.0.1'.
-      -i <clientid>  ID to use for this client. Defaults to 'mqtt-sn-tools-' with process id.
-      -k <keepalive> keep alive in seconds for this client. Defaults to 10.
-      -p <port>      Network port to connect to. Defaults to 1883.
-      -t <topic>     MQTT topic name to subscribe to.
-      -T <topicid>   Pre-defined MQTT-SN topic ID to publish to.
-      -v             Print messages verbosely, showing the topic name.
+It used the first byte in the recieved payload of the subscription topic
+to change the interval (0 to 256 seconds) between publishing messages.
 
 
 License

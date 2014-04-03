@@ -4,20 +4,18 @@
 #include "sys/etimer.h"
 #include "net/uip.h"
 #include "net/uip-ds6.h"
-//#include "net/uip-debug.h"
 #include "mqtt-sn.h"
 
 #include "net/rime.h"
 
 #include "simple-udp.h"
-//#include "servreg-hack.h"
 
 #include <stdio.h>
 #include <string.h>
 
 #define UDP_PORT 1884
 
-#define SEND_INTERVAL		(10 * CLOCK_SECOND)
+#define DEFAULT_SEND_INTERVAL		(10 * CLOCK_SECOND)
 #define SEND_TIME		(random_rand() % (SEND_INTERVAL))
 #define REPLY_TIMEOUT (3 * CLOCK_SECOND)
 
@@ -34,15 +32,8 @@ static uint16_t mqtt_keep_alive=20;
 static int8_t qos = 1;
 static uint8_t retain = FALSE;
 static char device_id[17];
+static uint8_t send_interval = DEFAULT_SEND_INTERVAL;
 //uint8_t debug = FALSE;
-
-//enum mqttsn_connection_status
-//{
-//  MQTTSN_DISCONNECTED =0,
-//  MQTTSN_WAITING_CONNACK,
-//  MQTTSN_CONNECTION_FAILED,
-//  MQTTSN_CONNECTED
-//};
 
 enum topic_registration_status
 {
@@ -136,7 +127,8 @@ publish_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr
   printf("Published message received\n");
   //see if this message corresponds to ctrl channel subscription request
   if (uip_htons(incoming_packet.topic_id) == ctrl_topic_id) {
-    //do something with incoming data here
+    //the new message interval will be read from the first byte of the recieved packet
+    send_interval = *data;
   } else {
     printf("unknown publication received\n");
   }
@@ -209,7 +201,7 @@ PROCESS_THREAD(publish_process, ev, data)
   ctimer_stop(&registration_timer);
   if (registration_state == MQTTSN_REGISTERED){
     //start topic publishing to topic at regular intervals
-    etimer_set(&send_timer, 10*CLOCK_SECOND);
+    etimer_set(&send_timer, send_interval);
     while(1)
     {
       PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&send_timer));
