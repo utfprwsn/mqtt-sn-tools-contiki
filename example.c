@@ -63,15 +63,6 @@ static char device_id[17];
 static uint8_t send_interval = DEFAULT_SEND_INTERVAL;
 //uint8_t debug = FALSE;
 
-enum topic_registration_status
-{
-  MQTTSN_UNREGISTERED = 0,
-  MQTTSN_WAITING_REGACK,
-  MQTTSN_WAITING_TOPIC_ID,
-  MQTTSN_REGISTER_FAILED,
-  MQTTSN_REGISTERED
-};
-
 enum ctrl_subscription_status
 {
   CTRL_UNSUBSCRIBED = 0,
@@ -80,8 +71,16 @@ enum ctrl_subscription_status
   CTRL_SUBSCRIBED
 };
 
+enum mqtt_sn_registration_status
+{
+  MQTTSN_UNREGISTERED=0,
+  MQTTSN_WAITING_REGACK,
+  MQTTSN_REGISTER_FAILED,
+  MQTTSN_REGISTERED
+};
+
 static enum mqttsn_connection_status connection_state = MQTTSN_DISCONNECTED;
-static enum topic_registration_status registration_state = MQTTSN_UNREGISTERED;
+static enum mqtt_sn_registration_status registration_state = MQTTSN_UNREGISTERED;
 static enum ctrl_subscription_status ctrl_subscription_state = CTRL_UNSUBSCRIBED;
 
 /*A few events for managing device state*/

@@ -32,6 +32,7 @@
 #include "clock.h"
 #include "etimer.h"
 #include "ctimer.h"
+#include "list.h"
 
 
 #ifndef FALSE
@@ -180,9 +181,6 @@ typedef struct topic_map {
   struct topic_map *next;
 } topic_map_t;
 
-//static void
-//mqtt_sn_receiver(struct simple_udp_connection *c, const uip_ipaddr_t *sender_addr, uint16_t sender_port,
-//         const uip_ipaddr_t *receiver_addr, uint16_t receiver_port, const uint8_t *data, uint16_t datalen);
 struct mqtt_sn_connection;
 struct mqtt_sn_callbacks {
   /** Called when a packet has been received by the mqtt_sn module or other event needs handled */
@@ -221,14 +219,12 @@ struct mqtt_sn_connection {
   struct ctimer send_timer;
   clock_time_t keep_alive;
   connack_packet_t last_connack;
-  regack_packet_t last_regack;
-  puback_packet_t last_puback;
-  disconnect_packet_t last_disconnect;
   const char* client_id;
   enum mqttsn_connection_status stat;
   uint8_t connection_retries;
   struct process *client_process;
   const struct mqtt_sn_callbacks *mc;
+  LIST_STRUCT(requests);
 };
 
 struct mqttsn_topic {
@@ -285,8 +281,61 @@ publish_packet_t* mqtt_sn_loop(int sock, int timeout);
 void mqtt_sn_register_topic(int topic_id, const char* topic_name);
 const char* mqtt_sn_lookup_topic(int topic_id);
 void mqtt_sn_cleanup();
-
-
-
-
 #endif
+
+#if 1
+/*MQTT SN Request is an abstraction of messages that require a response
+* from the broker to complete a negotiated connection
+* e.g. subscription, registration, unsubscription
+*/
+
+extern process_event_t mqtt_sn_request_event;
+
+enum mqtt_sn_request_state
+{
+  MQTTSN_NO_REQUEST = 0,
+  MQTTSN_REQUEST_WAITING_ACK,
+  MQTTSN_REQUEST_FAILED,
+  MQTTSN_REQUEST_COMPLETE
+};
+
+enum mqtt_sn_request_type
+{
+  MQTTSN_REGISTER_REQUEST =0,
+  MQTTSN_SUBSCRIBE_REQUEST,
+  MQTTSN_UNSUBSCRIBE_REQUEST
+};
+
+struct mqtt_sn_request
+{
+  struct mqtt_sn_request *next;
+  enum mqtt_sn_request_state state;
+  enum mqtt_sn_request_type request_type;
+  uint16_t msg_id;
+  uint16_t topic_id;
+  uint8_t return_code;
+  struct pt pt;
+  struct ctimer t;
+};
+
+typedef struct mqtt_sn_request mqtt_sn_register_request;
+typedef struct mqtt_sn_request mqtt_sn_subscribe_request;
+//typedef struct mqtt_sn_request mqtt_sn_unsubscribe_request;
+
+//uint16_t mqtt_sn_request_try(struct mqtt_sn_connection *mqc,struct mqtt_sn_request *req, void (*message_function)(void *msg_fct), const char* topic_name,uint8_t time_out, uint8_t retries);
+int mqtt_sn_request_returned(struct mqtt_sn_request *req);
+int mqtt_sn_request_success(struct mqtt_sn_request *req);
+
+uint16_t mqtt_sn_register_try(mqtt_sn_register_request *req, struct mqtt_sn_connection *mqc, const char* topic_name,clock_time_t time_out);
+
+uint16_t mqtt_sn_subscribe_try(mqtt_sn_subscribe_request *req, struct mqtt_sn_connection *mqc, const char* topic_name, uint8_t qos, clock_time_t time_out);
+
+//uint16_t mqtt_sn_unsubscribe_try(mqtt_sn_usubscribe_request *req; struct mqtt_sn_connection *mqc, const char* topic_name,uint8_t time_out, uint8_t retries);
+
+#endif // 1
+
+
+
+
+
+

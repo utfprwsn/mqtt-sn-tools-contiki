@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include "simple-udp.h"
 #include "net/uip.h"
+#include "list.h"
 
 
 #include <string.h>
@@ -54,26 +55,19 @@ static uint8_t debug = FALSE;
 topic_map_t *topic_map = NULL;
 
 /*MQTT_SN events*/
-//Ping request
-//static process_event_t pingreq_event;
-//Ping response
-//static process_event_t pingresp_event;
-//PubAck received
-//static process_event_t puback_event;
+process_event_t mqtt_sn_request_event;
 //Connack recieved
 static process_event_t connack_event;
-//Regack received
-//static process_event_t regack_event;
-//Willtopic request received
-//Willmsg request received
-//WillTopicResp received
-//WillMsgResp received
-//Disconnect received
 static process_event_t disconnect_event;
 static process_event_t receive_timeout_event;
 static process_event_t send_timeout_event;
 
 PROCESS(mqtt_sn_process, "MQTT_SN process");
+void manage_response(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr,
+                 const uint8_t *data, uint16_t datalen);
+static int manage_request(struct mqtt_sn_request *req, struct mqtt_sn_connection *mqc,
+               const char* topic_name, uint8_t qos,clock_time_t time_out);
+static void request_timer_callback(void *req);
 
 #if 1
 void mqtt_sn_set_debug(uint8_t value)
@@ -83,10 +77,6 @@ void mqtt_sn_set_debug(uint8_t value)
 #endif
 
 #if 1
-//static connack_packet_t last_connack;
-//static regack_packet_t last_regack;
-//static puback_packet_t last_puback;
-//static disconnect_packet_t last_disconnect;
 static void
 mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_addr, uint16_t sender_port,
          const uip_ipaddr_t *receiver_addr, uint16_t receiver_port, const uint8_t *data, uint16_t datalen)
@@ -97,7 +87,6 @@ mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_
     ctimer_restart((&(mqc->receive_timer)));
     printf("recieve timer reset\n");
   }
-  //last_receive = clock_time();
   if (datalen >= 2)
   {
     msg_type = data[1];
@@ -122,10 +111,10 @@ mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_
 //        case MQTT_SN_TYPE_REGISTER:
         case MQTT_SN_TYPE_REGACK:
           {
-            memcpy(&mqc->last_regack,data,sizeof(regack_packet_t));
             if(mqc->mc->regack_recv != NULL) {
               mqc->mc->regack_recv(mqc, receiver_addr, data, datalen);
             }
+            manage_response(mqc, receiver_addr, data, datalen);
             break;
           }
         case MQTT_SN_TYPE_PUBLISH:
@@ -137,7 +126,6 @@ mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_
           }
         case MQTT_SN_TYPE_PUBACK:
           {
-            memcpy(&mqc->last_puback,data,sizeof(puback_packet_t));
             if(mqc->mc->puback_recv != NULL) {
               mqc->mc->puback_recv(mqc, receiver_addr, data, datalen);
             }
@@ -152,6 +140,7 @@ mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_
             if(mqc->mc->suback_recv != NULL) {
               mqc->mc->suback_recv(mqc, receiver_addr, data, datalen);
             }
+            manage_response(mqc, receiver_addr, data, datalen);
             break;
           }
 //        case MQTT_SN_TYPE_UNSUBSCRIBE:
@@ -173,7 +162,6 @@ mqtt_sn_receiver(struct simple_udp_connection *sock, const uip_ipaddr_t *sender_
           }
         case MQTT_SN_TYPE_DISCONNECT:
           {
-            memcpy(&mqc->last_disconnect,data,sizeof(disconnect_packet_t));
             process_post(&mqtt_sn_process, disconnect_event, mqc);
             if(mqc->mc->disconnect_recv != NULL) {
               mqc->mc->disconnect_recv(mqc, receiver_addr, data, datalen);
@@ -204,6 +192,8 @@ int mqtt_sn_create_socket(struct mqtt_sn_connection *mqc, uint16_t local_port, u
   mqc->keep_alive=0;
   mqc->next_message_id = 1;
   mqc->connection_retries = 0;
+  list_init(mqc->requests);
+  mqtt_sn_request_event = process_alloc_event();
   process_start(&mqtt_sn_process, NULL);
   return 0;
 }
@@ -743,4 +733,96 @@ void mqtt_sn_cleanup()
     }
 }
 #endif
+#if 1
+int mqtt_sn_request_returned(struct mqtt_sn_request *req) {
+  if (req->state == MQTTSN_REQUEST_COMPLETE || req->state == MQTTSN_REQUEST_FAILED) { return 1;}
+  else {return 0;}
+}
+
+int mqtt_sn_request_success(struct mqtt_sn_request *req) {
+  if (req->state == MQTTSN_REQUEST_COMPLETE) {return 1;}
+  else {return 0;}
+}
+
+void
+manage_response(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr,
+                 const uint8_t *data, uint16_t datalen)
+{
+  uint8_t msg_type;
+  uint16_t msg_id = 0;
+  uint8_t return_code = 0;
+  uint16_t topic_id = 0;
+  struct mqtt_sn_request *req;
+  msg_type = data[1];
+  if (msg_type == MQTT_SN_TYPE_REGACK) {
+    regack_packet_t incoming_regack;
+    memcpy(&incoming_regack, data, datalen);
+    msg_id = incoming_regack.message_id;
+    return_code = incoming_regack.return_code;
+    topic_id = uip_htons(incoming_regack.topic_id);
+  }
+  else if ( msg_type == MQTT_SN_TYPE_SUBACK) {
+    suback_packet_t incoming_suback;
+    memcpy(&incoming_suback, data, datalen);
+    msg_id = incoming_suback.message_id;
+    return_code = incoming_suback.return_code;
+    topic_id = uip_htons(incoming_suback.topic_id);
+  }
+  for(req = list_head(mqc->requests); req != NULL; req = req->next) {
+    if(req->msg_id == msg_id) {
+      req->topic_id = topic_id;
+      req->return_code = return_code;
+      if (return_code == 0){
+        req->state = MQTTSN_REQUEST_COMPLETE;
+      }
+      else {
+        req->state = MQTTSN_REQUEST_FAILED;
+      }
+      manage_request(req,mqc,NULL,0,0);
+    }
+  }
+}
+
+static void request_timer_callback(void *req)
+{
+  struct mqtt_sn_request *req2 = (struct mqtt_sn_request *)req;
+  manage_request(req2,NULL,NULL,0,0);
+}
+
+static int
+manage_request(struct mqtt_sn_request *req, struct mqtt_sn_connection *mqc,
+               const char* topic_name, uint8_t qos,clock_time_t time_out)
+{
+  PT_BEGIN(&(req->pt));
+  list_add(mqc->requests,req);
+  ctimer_set(&(req->t), time_out, request_timer_callback, req);
+  req->state = MQTTSN_REQUEST_WAITING_ACK;
+  if (req->request_type == MQTTSN_REGISTER_REQUEST) {
+    req->msg_id = mqtt_sn_send_register(mqc, topic_name);
+  }
+  if (req->request_type == MQTTSN_SUBSCRIBE_REQUEST) {
+    req->msg_id = mqtt_sn_send_subscribe(mqc, topic_name, qos);
+  }
+  PT_YIELD(&(req->pt)); /* Wait until timer expired or response received */
+  ctimer_stop(&(req->t));
+  process_post(PROCESS_BROADCAST,mqtt_sn_request_event,req);
+  list_remove(mqc->requests,req);
+  PT_END(&(req->pt));
+  return 1;
+}
+
+uint16_t mqtt_sn_register_try(mqtt_sn_register_request *req, struct mqtt_sn_connection *mqc,
+                              const char* topic_name,clock_time_t time_out) {
+  manage_request(req,mqc,topic_name,0,time_out);
+  return req->msg_id;
+}
+
+uint16_t mqtt_sn_subscribe_try(mqtt_sn_subscribe_request *req, struct mqtt_sn_connection *mqc,
+                               const char* topic_name, uint8_t qos, clock_time_t time_out) {
+  manage_request(req,mqc,topic_name,qos,time_out);
+  return req->msg_id;
+}
+
+#endif // 1
+
 
