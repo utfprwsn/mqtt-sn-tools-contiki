@@ -301,7 +301,7 @@ enum mqtt_sn_request_state
 
 enum mqtt_sn_request_type
 {
-  MQTTSN_REGISTER_REQUEST =0,
+  MQTTSN_REGISTER_REQUEST = 0,
   MQTTSN_SUBSCRIBE_REQUEST,
   MQTTSN_UNSUBSCRIBE_REQUEST
 };

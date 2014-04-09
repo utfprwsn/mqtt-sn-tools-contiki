@@ -192,7 +192,7 @@ int mqtt_sn_create_socket(struct mqtt_sn_connection *mqc, uint16_t local_port, u
   mqc->keep_alive=0;
   mqc->next_message_id = 1;
   mqc->connection_retries = 0;
-  list_init(mqc->requests);
+  LIST_STRUCT_INIT(mqc,requests);
   mqtt_sn_request_event = process_alloc_event();
   process_start(&mqtt_sn_process, NULL);
   return 0;
@@ -813,12 +813,14 @@ manage_request(struct mqtt_sn_request *req, struct mqtt_sn_connection *mqc,
 
 uint16_t mqtt_sn_register_try(mqtt_sn_register_request *req, struct mqtt_sn_connection *mqc,
                               const char* topic_name,clock_time_t time_out) {
+  req->request_type = MQTTSN_REGISTER_REQUEST;
   manage_request(req,mqc,topic_name,0,time_out);
   return req->msg_id;
 }
 
 uint16_t mqtt_sn_subscribe_try(mqtt_sn_subscribe_request *req, struct mqtt_sn_connection *mqc,
                                const char* topic_name, uint8_t qos, clock_time_t time_out) {
+  req->request_type = MQTTSN_SUBSCRIBE_REQUEST;
   manage_request(req,mqc,topic_name,qos,time_out);
   return req->msg_id;
 }
