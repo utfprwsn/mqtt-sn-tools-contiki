@@ -43,8 +43,8 @@
 
 #define UDP_PORT 1884
 
+#define REQUEST_RETRIES 4
 #define DEFAULT_SEND_INTERVAL		(10 * CLOCK_SECOND)
-#define SEND_TIME		(random_rand() % (SEND_INTERVAL))
 #define REPLY_TIMEOUT (3 * CLOCK_SECOND)
 
 static struct mqtt_sn_connection mqtt_sn_c;
@@ -63,30 +63,10 @@ static char device_id[17];
 static uint8_t send_interval = DEFAULT_SEND_INTERVAL;
 //uint8_t debug = FALSE;
 
-enum ctrl_subscription_status
-{
-  CTRL_UNSUBSCRIBED = 0,
-  CTRL_WAITING_SUBACK,
-  CTRL_SUBSCRIBE_FAILED,
-  CTRL_SUBSCRIBED
-};
-
-enum mqtt_sn_registration_status
-{
-  MQTTSN_UNREGISTERED=0,
-  MQTTSN_WAITING_REGACK,
-  MQTTSN_REGISTER_FAILED,
-  MQTTSN_REGISTERED
-};
-
 static enum mqttsn_connection_status connection_state = MQTTSN_DISCONNECTED;
-static enum mqtt_sn_registration_status registration_state = MQTTSN_UNREGISTERED;
-static enum ctrl_subscription_status ctrl_subscription_state = CTRL_UNSUBSCRIBED;
 
 /*A few events for managing device state*/
 static process_event_t mqttsn_connack_event;
-static process_event_t mqttsn_regack_event;
-static process_event_t ctrl_suback_event;
 
 PROCESS(example_mqttsn_process, "Configure Connection and Topic Registration");
 PROCESS(publish_process, "register topic and publish data");
@@ -124,7 +104,6 @@ regack_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr,
   if (incoming_regack.message_id == reg_topic_msg_id) {
     if (incoming_regack.return_code == ACCEPTED) {
       publisher_topic_id = uip_htons(incoming_regack.topic_id);
-      process_post(&publish_process,mqttsn_regack_event, NULL);
     } else {
       printf("Regack error: %s\n", mqtt_sn_return_code_string(incoming_regack.return_code));
     }
@@ -140,7 +119,6 @@ suback_receiver(struct mqtt_sn_connection *mqc, const uip_ipaddr_t *source_addr,
   if (incoming_suback.message_id == ctrl_topic_msg_id) {
     if (incoming_suback.return_code == ACCEPTED) {
       ctrl_topic_id = uip_htons(incoming_suback.topic_id);
-      process_post(&ctrl_subscription_process,ctrl_suback_event, NULL);
     } else {
       printf("Suback error: %s\n", mqtt_sn_return_code_string(incoming_suback.return_code));
     }
@@ -177,14 +155,6 @@ static const struct mqtt_sn_callbacks mqtt_sn_call = {
 
 /*---------------------------------------------------------------------------*/
 /*this process will publish data at regular intervals*/
-static struct ctimer registration_timer;
-static process_event_t registration_timeout_event;
-
-static void registration_timer_callback(void *mqc)
-{
-  process_post(&publish_process, registration_timeout_event, NULL);
-}
-
 PROCESS_THREAD(publish_process, ev, data)
 {
   static uint8_t registration_tries;
@@ -192,41 +162,28 @@ PROCESS_THREAD(publish_process, ev, data)
   static uint8_t buf_len;
   static uint8_t message_number;
   static char buf[20];
+  static mqtt_sn_register_request *rreq;
 
   PROCESS_BEGIN();
   memcpy(pub_topic,device_id,16);
-  mqttsn_regack_event = process_alloc_event();
   printf("registering topic\n");
   registration_tries =0;
-  registration_timeout_event = process_alloc_event();
-  ctimer_set( &registration_timer, REPLY_TIMEOUT, registration_timer_callback, NULL);
-  reg_topic_msg_id = mqtt_sn_send_register(&mqtt_sn_c, pub_topic);
-  registration_state = MQTTSN_WAITING_REGACK;
-  while (registration_tries < 4)
+  while (registration_tries < REQUEST_RETRIES)
   {
-    PROCESS_WAIT_EVENT();
-    if (ev == registration_timeout_event)
-    {
-      registration_state = MQTTSN_REGISTER_FAILED;
+    reg_topic_msg_id = mqtt_sn_register_try(rreq,&mqtt_sn_c,pub_topic,REPLY_TIMEOUT);
+    PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(rreq));
+    if (mqtt_sn_request_success(rreq)) {
+      registration_tries = 4;
+      printf("registration acked\n");
+    }
+    else {
       registration_tries++;
-      printf("registration timeout\n");
-      ctimer_restart(&registration_timer);
-      if (registration_tries < 4) {
-        reg_topic_msg_id = mqtt_sn_send_register(&mqtt_sn_c, pub_topic);
-        registration_state = MQTTSN_WAITING_REGACK;
+      if (rreq->state == MQTTSN_REQUEST_FAILED) {
+          printf("Regack error: %s\n", mqtt_sn_return_code_string(rreq->return_code));
       }
     }
-    else if (ev == mqttsn_regack_event)
-    {
-      //if success
-      printf("registration acked\n");
-      ctimer_stop(&registration_timer);
-      registration_state = MQTTSN_REGISTERED;
-      registration_tries = 4;//using break here may mess up switch statement of process
-    }
   }
-  ctimer_stop(&registration_timer);
-  if (registration_state == MQTTSN_REGISTERED){
+  if (mqtt_sn_request_success(rreq)){
     //start topic publishing to topic at regular intervals
     etimer_set(&send_timer, send_interval);
     while(1)
@@ -242,59 +199,32 @@ PROCESS_THREAD(publish_process, ev, data)
   } else {
     printf("unable to register topic\n");
   }
-
   PROCESS_END();
 }
 
 /*---------------------------------------------------------------------------*/
 /*this process will create a subscription and monitor for incoming traffic*/
-static struct ctimer subscription_timer;
-static process_event_t subscription_timeout_event;
-
-static void subscription_timer_callback(void *mqc)
-{
-  process_post(&ctrl_subscription_process, subscription_timeout_event, NULL);
-}
-
 PROCESS_THREAD(ctrl_subscription_process, ev, data)
 {
   static uint8_t subscription_tries;
+  static mqtt_sn_register_request *sreq;
   PROCESS_BEGIN();
-  ctrl_suback_event = process_alloc_event();
   subscription_tries = 0;
   memcpy(ctrl_topic,device_id,16);
-  subscription_timeout_event = process_alloc_event();
-  ctimer_set( &subscription_timer, REPLY_TIMEOUT, subscription_timer_callback, NULL);
-  //request subscription
-  ctrl_topic_msg_id = mqtt_sn_send_subscribe(&mqtt_sn_c,ctrl_topic,0);//QOS 1 currently unsupported on client
-  ctrl_subscription_state = CTRL_WAITING_SUBACK;
-  while(subscription_tries < 10) {
-    PROCESS_WAIT_EVENT();
-    if (ev == subscription_timeout_event)
-    {
-      ctrl_subscription_state = CTRL_SUBSCRIBE_FAILED;
+  while(subscription_tries < REQUEST_RETRIES) {
+    ctrl_topic_msg_id = mqtt_sn_subscribe_try(sreq,&mqtt_sn_c,pub_topic,0,REPLY_TIMEOUT);
+    PROCESS_WAIT_EVENT_UNTIL(mqtt_sn_request_returned(sreq));
+    if (mqtt_sn_request_success(sreq)) {
+      subscription_tries = 4;
+      printf("subscription acked\n");
+    }
+    else {
       subscription_tries++;
-      printf("subscription timeout\n");
-      ctimer_restart(&subscription_timer);
-      if (subscription_tries < 10) {
-        ctrl_topic_msg_id = mqtt_sn_send_subscribe(&mqtt_sn_c,ctrl_topic,0);//QOS 1 currently unsupported on client
-        ctrl_subscription_state = CTRL_WAITING_SUBACK;
+      if (sreq->state == MQTTSN_REQUEST_FAILED) {
+          printf("Suback error: %s\n", mqtt_sn_return_code_string(sreq->return_code));
       }
     }
-    else if (ev == ctrl_suback_event)
-    {
-      //if success
-      printf("subscription to control topic acked\n");
-      ctimer_stop(&subscription_timer);
-      ctrl_subscription_state = CTRL_SUBSCRIBED;
-      subscription_tries = 10;//using break here may mess up switch statement of process
-    }
   }
-  if (ctrl_subscription_state != CTRL_SUBSCRIBED) {
-    printf("subscription to control topic failed\n");
-  }
-  ctimer_stop(&subscription_timer);
-
   PROCESS_END();
 }
 
