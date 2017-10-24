@@ -30,11 +30,11 @@
 #include "lib/random.h"
 #include "sys/ctimer.h"
 #include "sys/etimer.h"
-#include "net/uip.h"
-#include "net/uip-ds6.h"
+#include "net/ip/uip.h"
+#include "net/ipv6/uip-ds6.h"
 #include "mqtt-sn.h"
 
-#include "net/rime.h"
+#include "net/rime/rime.h"
 
 #include "simple-udp.h"
 
@@ -264,10 +264,10 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
   mqtt_sn_create_socket(&mqtt_sn_c,UDP_PORT, &broker_addr, UDP_PORT);
   (&mqtt_sn_c)->mc = &mqtt_sn_call;
 
-  sprintf(device_id,"%02X%02X%02X%02X%02X%02X%02X%02X",rimeaddr_node_addr.u8[0],
-          rimeaddr_node_addr.u8[1],rimeaddr_node_addr.u8[2],rimeaddr_node_addr.u8[3],
-          rimeaddr_node_addr.u8[4],rimeaddr_node_addr.u8[5],rimeaddr_node_addr.u8[6],
-          rimeaddr_node_addr.u8[7]);
+  sprintf(device_id,"%02X%02X%02X%02X%02X%02X%02X%02X",linkaddr_node_addr.u8[0],
+          linkaddr_node_addr.u8[1],linkaddr_node_addr.u8[2],linkaddr_node_addr.u8[3],
+          linkaddr_node_addr.u8[4],linkaddr_node_addr.u8[5],linkaddr_node_addr.u8[6],
+          linkaddr_node_addr.u8[7]);
 
   /*Wait a little to let system get set*/
   etimer_set(&periodic_timer, 17*CLOCK_SECOND);

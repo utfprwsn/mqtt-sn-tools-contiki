@@ -29,7 +29,7 @@
 //#include <unistd.h>
 #include <stdlib.h>
 #include "simple-udp.h"
-#include "net/uip.h"
+#include "net/ip/uip.h"
 #include "list.h"
 
 

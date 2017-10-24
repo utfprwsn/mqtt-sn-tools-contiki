@@ -14,7 +14,7 @@
 //#define  VP_MSG_RCD_CNT 9
 
 //turn off TCP in order to reduce ROM/RAM
-#define UIP_CONF_TCP 0
+//#define UIP_CONF_TCP 0
 
 ////Ports for UDP
 //#define UDP_PORT 5688
@@ -38,15 +38,15 @@
 //#define UIP_CONF_RECEIVE_WINDOW  200
 //#endif
 
-#ifdef NETSTACK_CONF_RDC
-#undef NETSTACK_CONF_RDC
-#endif
-#ifdef NETSTACK_CONF_MAC
-#undef NETSTACK_CONF_MAC
-#endif
+//#ifdef NETSTACK_CONF_RDC
+//#undef NETSTACK_CONF_RDC
+//#endif
+//#ifdef NETSTACK_CONF_MAC
+//#undef NETSTACK_CONF_MAC
+//#endif
 
-#define NETSTACK_CONF_MAC nullmac_driver
-#define NETSTACK_CONF_RDC nullrdc_driver
+//#define NETSTACK_CONF_MAC nullmac_driver
+//#define NETSTACK_CONF_RDC nullrdc_driver
 
 
 //#define NODE_TYPE_COLLECTOR 1
