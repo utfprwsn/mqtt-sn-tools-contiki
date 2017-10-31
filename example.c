@@ -367,8 +367,7 @@ PROCESS_THREAD(example_mqttsn_process, ev, data)
     }
   }
 
-  //uip_ip6addr(&broker_addr, 0x2001,0x1284,0xf016,0x5bfa,0xf66d,0x4ff,0xfed6,0x1339);//172.16.220.128 with tayga
-
+  //uip_ip6addr(&broker_addr, 0x2804,0x7f4,0x3b80,0xcdf7,0x241b,0x1ab2,0xa46a,0x9912);//172.16.220.128 with tayga
 
   mqtt_sn_create_socket(&mqtt_sn_c,UDP_PORT, &broker_addr, UDP_PORT);
   (&mqtt_sn_c)->mc = &mqtt_sn_call;
